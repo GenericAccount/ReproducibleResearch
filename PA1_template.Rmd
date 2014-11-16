@@ -1,0 +1,120 @@
+---
+title: "ReproducibilityAssessment1"
+author: "James Sidell"
+date: "Sunday, November 16, 2014"
+output: html_document
+---
+```{r setoptions, echo=TRUE}
+options(scipen=1, digits=2)
+```
+
+##Load the data first
+  I'll use dplyr so I can group by the date easily.  echo=TRUE throughout this document (I'm not hiding anything.  I promise).
+```{r, results='hide'}
+library(dplyr)
+setwd("C:/Users/James/Dropbox/DataScience/Reprod")
+rawData <- read.csv("repdata/activity.csv")
+head(rawData)
+```
+
+##Preprocess the data
+  Remove 'NAs' for initial work, make a histogram of total steps per day, and calculate summary values for each day.
+
+```{r}
+cleanData <- rawData[complete.cases(rawData),]
+summaryData <- summarise(group_by(cleanData,date),
+                        n=sum(steps),
+                        m=mean(steps),
+                        med=median(steps))
+meanTotal <- mean(summaryData$n)
+medianTotal <- median(summaryData$n)
+```
+
+  Mean of total steps is `r meanTotal`.
+  
+  Median of total steps is `r medianTotal`.
+  
+
+  A histogram of the total steps per day is shown below:
+```{r}
+hist(summaryData$n, main="Histogram of Total Steps per Day", xlab="Total Steps per Day", breaks=10)
+```
+
+##Average Daily Activity Pattern
+
+```{r}
+intervalAverage <- summarise(group_by(cleanData,interval), 
+                             mean=mean(steps))
+plot(intervalAverage$mean,type="l", main="Average Steps by Interval",xlab="5 Minute Interval", ylab="Average Steps over Experiment")
+lines(rep(mean(intervalAverage$mean),length(intervalAverage$interval)),col="blue")
+
+maxInterval <- intervalAverage[intervalAverage$mean==max(intervalAverage$mean),]
+hours <- (maxInterval-(maxInterval %% 60))/60
+minutes <- (maxInterval %% 60)
+```
+
+  The interval which had the maximum overall average steps during the experiment was `r maxInterval$interval`.  This was the five minute interval starting at `r hours[1]`:`r minutes[1]`.
+
+##Input Missing Values
+
+```{r}
+  summary(complete.cases(rawData))
+  
+  data <- group_by(rawData, interval)
+  interval <- group_by(intervalAverage, interval)
+  
+  imputate <- seq(1, nrow(data))
+  for (i in 1:nrow(data)){
+    imputate[i] = intervalAverage[intervalAverage$interval==data$interval[i],2]    
+  }
+  data <- cbind(data, imputate)
+  
+  synthData <- mutate(data, synth=ifelse(!is.na(steps), steps,imputate))
+  synthData <- synthData[, c("date", "interval", "synth")]
+  head(synthData)
+
+```
+
+  From the summary of the complete.cases output we can see there are 2304 values of NA in the data set that need to be replaced.
+  
+  Replacing the data is trickier.  There could be a long discussion about exactly how to do it, so I will simply replace the values for each missing interval with the mean for that interval over the course of the experiment.  This data will come from the intervalAverage table I created earlier.  I really hated to put a for loop in there, but I kept running into problems trying to use mutate only to pull the necessary value from the intervalAverage table.  The new data table produced is named synthData, and a brief summary is shown above.
+  
+```{r}
+  synthSummary <- summarise(group_by(synthData, date), n=sum(synth), m=mean(synth), med=median(synth))
+  
+meanSynthDay <- mean(synthSummary$n)
+medianSynthDay <- median(synthSummary$n)
+```
+
+  Mean of total steps is `r meanSynthDay`.
+  
+  Median of total steps is `r medianSynthDay`.
+  
+
+  A histogram of the total steps per day is shown below:
+```{r}
+hist(synthSummary$n, main="Histogram of Total Steps per Day Post Imputation", xlab="Total Steps per Day", breaks=10)
+  
+```
+  
+  It turns out the histogram isn't that much different than before.  The mean is roughly the same, and the median is just slightly higher than before.  This is to be expected, however, since I used the mean values for the interval.  Adding values that were already a part of the distribution shouldn't have affected much, although it did increase the size of the unnormalized histogram above.
+  
+##Weekdays vs Weekend Analysis
+  Here I mutated the dataset to add a column with the name of the day and whether the day was a "weekday" or "weekend".
+```{r}
+  synthData <- mutate(synthData, weekday=weekdays(as.POSIXct(date)))
+  synthData <- mutate(synthData, weekend=ifelse(weekday=="Sunday" | weekday=="Saturday","weekend","weekday"))
+  synthSummary <- summarise(group_by(synthData, interval, weekend), intMean=mean(synth))
+
+  weekendData <- synthSummary[synthSummary$weekend=="weekend",]
+  weekdayData <- synthSummary[synthSummary$weekend=="weekday",]
+  
+  par(mfrow=c(1,2))
+  plot(weekendData$interval, weekendData$intMean,type="l", main="Average Steps Weekends Only",xlab="5 Minute Interval", ylab="Average Steps per Interval")
+  
+  plot(weekdayData$interval, weekdayData$intMean,type="l", main="Average Steps Weekdays Only",xlab="5 Minute Interval", ylab="Average Steps per Interval")
+```
+  
+    I was unable to find the README file in any of the course github repos describing how these two plots shoudl look, so hopefully these are about right!
+    
+    Above are time series graphs of the average total steps per interval for weekdays and weekends.  We can see the activity starts more abruptly in the morning on the weekends, but overall the intensity (steps be interval), is less through the rest of the day.
